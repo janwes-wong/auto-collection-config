@@ -87,7 +87,7 @@ def get_switch_config(device, input_command=None):
 
             duration = time.time() - start_time
             logger.info(f"成功获取 {device['ip']} 配置 ({duration:.2f}秒)")
-            return output
+            return command, output
 
     except NetMikoTimeoutException:
         print(f"\n连接超时: {device['ip']}")
@@ -99,7 +99,7 @@ def get_switch_config(device, input_command=None):
         print(f"\n获取 {device['ip']} 配置失败: {str(e)}")
         logger.error(f"获取 {device['ip']} 配置失败: {str(e)}")
 
-    return None
+    return None, None
 
 
 def get_config_command(device_type):
@@ -120,22 +120,28 @@ def get_config_command(device_type):
     return commands.get(device_type, 'show running-config')
 
 
-def save_config_to_file(ip, config, output_dir):
+def save_config_to_file(ip, command, config, output_dir):
     """
     保存配置到文件
     :param ip: 设备IP地址
+    :param command: 命令
     :param config: 配置文本
     :param output_dir: 输出目录
     :return: 保存的文件路径
     """
     try:
+        # 操作时间
+        op_time = datetime.now()
         # 创建文件名
-        filename = f"{ip}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt"
+        filename = f"{ip}_{op_time.strftime('%Y%m%d')}.txt"
         file_path = os.path.join(output_dir, filename)
 
-        # 保存配置
-        with open(file_path, 'w', encoding='utf-8') as f:
-            f.write(config)
+        content = f"# {op_time.strftime('%Y-%m-%d %H:%M:%S')} {command}"
+        # 如果文件不存在则创建，存在则追加
+        with open(file_path, 'a' if os.path.exists(file_path) else 'w', encoding='utf-8') as f:
+            f.write(content + "\n")
+            f.write(config + "\n")
+            f.write("## --=========================================================--" + "\n")
 
         logger.info(f"===> 配置已保存: {filename}")
         return file_path
@@ -165,11 +171,11 @@ def process_connection(devices, output_dir, input_command=None):
         print(f"===> connect to devices: {ip} {desc}...", end='', flush=True)
 
         # 获取配置
-        config = get_switch_config(device, input_command)
+        command, config = get_switch_config(device, input_command)
 
         if config:
             # 保存配置
-            save_config_to_file(ip, config, output_dir)
+            save_config_to_file(ip, command, config, output_dir)
             success_count += 1
             print("\n ✓ execute successful...")
         else:
@@ -181,10 +187,17 @@ def process_connection(devices, output_dir, input_command=None):
     return success_count
 
 
-def print_log(success_count, devices, is_normal=True):
+def print_log(success_count, devices, is_from_config_file=True):
+    """
+    打印日志
+    :param success_count: 处理成功数量
+    :param devices: 设备列表
+    :param is_from_config_file: 是否来自配置文件
+    :return:
+    """
     print(f"数据采集完毕 : {success_count}/{len(devices)}（成功数量/任务总数）")
     print("日志文件: server.log")
-    config_path = "config_storage/normal" if is_normal else "config_storage/other"
+    config_path = "config_storage/normal" if is_from_config_file else "config_storage/other"
     print(f"配置文件目录: {config_path}")
     print("\n" + "-*-" * 20)
 
@@ -197,7 +210,7 @@ def execute_other_command(devices):
     """
     while True:
         try:
-            input_command = input("\n请输入操作指令（输入'exit'退出）：")
+            input_command = input("\n请输入操作指令（输入 'exit' 退出）：")
             if input_command == 'exit':
                 logger.info("===> 用户退出程序")
                 break
